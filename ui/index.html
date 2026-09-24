@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sticky Note</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* Note-only additions, kept here so the shared card stylesheet stays untouched.
+         Same design language as the other two widgets: colourless glass, white ink, and
+         the mint accent used for exactly one thing -- the tick on a finished item. */
+      .items {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .items li {
+        display: grid;
+        grid-template-columns: 16px 1fr 16px;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 2px;
+        border-radius: 6px;
+      }
+      .items li:hover {
+        background: color-mix(in srgb, var(--ink) 8%, transparent);
+      }
+      .tick {
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        border: 1px solid color-mix(in srgb, var(--ink) 45%, transparent);
+        border-radius: 4px;
+        background: transparent;
+        color: transparent;
+        font-size: 10px;
+        line-height: 1;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+      }
+      .items li[data-done="true"] .tick {
+        border-color: var(--mode);
+        background: var(--mode);
+        color: #08110c;
+      }
+      .items .text {
+        font-size: 12.5px;
+        line-height: 1.35;
+        color: var(--ink);
+        word-break: break-word;
+      }
+      /* Struck through once ticked, and dimmed so the open items stand out. */
+      .items li[data-done="true"] .text {
+        text-decoration: line-through;
+        text-decoration-color: color-mix(in srgb, var(--ink) 55%, transparent);
+        color: var(--ink-faint);
+      }
+      .del {
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--ink-faint);
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0;
+      }
+      .items li:hover .del {
+        opacity: 1;
+      }
+      .del:hover {
+        color: var(--mode);
+      }
+      .add {
+        width: 100%;
+        margin: 6px 0 0;
+        padding: 5px 7px;
+        border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--ink) 6%, transparent);
+        color: var(--ink);
+        font: inherit;
+        font-size: 12.5px;
+      }
+      .add::placeholder {
+        color: var(--ink-faint);
+      }
+      .add:focus {
+        outline: none;
+        border-color: color-mix(in srgb, var(--mode) 65%, transparent);
+      }
+      /* The card body is for reading and typing, so the window is dragged by its
+         header strip only -- otherwise selecting text would move the widget. */
+      .card-head {
+        cursor: grab;
+      }
+      .widget[data-draggable="false"] .card-head {
+        cursor: default;
+      }
+      .widget[data-draggable="false"] .grip {
+        display: none;
+      }
+      .empty {
+        margin: 6px 2px;
+        font-size: 11.5px;
+        color: var(--ink-faint);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- One card: a header strip, the checklist, and a line to add to it. Everything
+         else lives behind the gear. The card fills the window, which lets the host blur
+         the desktop behind it and clip its shape to a rounded rectangle. -->
+    <main class="widget" id="widget" data-glass="clear" data-draggable="true">
+      <section class="card" id="card">
+        <span class="tint" aria-hidden="true"></span>
+
+        <header class="card-head" id="drag-handle">
+          <p class="badge" id="badge" role="status" aria-live="polite">
+            <span class="dot" aria-hidden="true"></span>
+            <span id="badge-label">NOTE</span>
+          </p>
+          <div class="tools">
+            <button class="icon-btn" id="btn-settings" type="button" aria-expanded="false"
+                    title="Settings" aria-label="Settings">
+              <svg class="gear" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+            <button class="icon-btn" id="btn-hide" type="button" title="Hide to tray" aria-label="Hide to tray">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" /></svg>
+            </button>
+            <button class="icon-btn" id="btn-quit" type="button" title="Quit" aria-label="Quit">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" /></svg>
+            </button>
+          </div>
+        </header>
+
+        <ul class="items" id="items"></ul>
+        <p class="empty" id="empty" hidden>Nothing on the note yet.</p>
+
+        <input class="add" id="add" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Add an item and press Enter" aria-label="Add an item" />
+
+        <div class="sheet" id="sheet" hidden>
+          <button class="sheet-close" id="sheet-close" type="button" title="Close settings"
+                  aria-label="Close settings">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" /></svg>
+          </button>
+          <p class="sheet-label">Settings</p>
+          <div class="switches">
+            <button class="switch" id="sw-on-top" type="button" role="switch" aria-checked="true"
+                    title="Keep the widget above other windows">Always on top</button>
+            <button class="switch" id="sw-autostart" type="button" role="switch" aria-checked="false"
+                    title="Launch the widget when Windows starts">Start with Windows</button>
+            <button class="switch" id="sw-stay-on-desktop" type="button" role="switch" aria-checked="true"
+                    title="Keep the note on the desktop through show desktop">Stay on desktop</button>
+            <button class="switch" id="sw-glass" type="button" role="switch" aria-checked="true"
+                    title="Blur the desktop behind the card">Glass</button>
+            <button class="switch" id="sw-draggable" type="button" role="switch" aria-checked="true"
+                    title="Untick to lock the note in place: no moving and no resizing">Draggable</button>
+          </div>
+        </div>
+
+        <!-- Drag the header strip to move the note; drag this to resize. Both gestures
+             are performed natively by the host (see app.py _gesture). -->
+        <span class="grip" id="grip" title="Drag to resize">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M15 9L9 15M15 13l-2 2" />
+          </svg>
+        </span>
+      </section>
+    </main>
+    <script src="widget.js"></script>
+  </body>
+</html>

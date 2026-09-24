@@ -1,0 +1,591 @@
+/* ===========================================================================
+   DeepSeek Balance — a neutral glass card.
+
+   The window is transparent and the host applies Windows' acrylic blur behind
+   it, so the desktop shows through the card.  The material here is deliberately
+   colourless and light on decoration: a neutral dark shade with white text, a
+   hairline rim, and one faint highlight along the top.  Colour is reserved for
+   state — the dot, the badge and the arrow — and nothing else.
+
+   Two densities, both the same dark neutral glass:
+     clear  (default)      thin, so the wallpaper and blurred content read through
+     dense  (bright behind) the same glass, thickened — white text needs a darker
+                           backdrop, and this is how it stays legible over a white
+                           window without ever turning the card white.
+   The host samples the desktop and sets data-glass on .widget.
+   =========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --radius: 14px;
+
+  --shade-1: rgba(10, 13, 18, 0.44);
+  --shade-2: rgba(10, 13, 18, 0.34);
+  --shade-3: rgba(10, 13, 18, 0.42);
+  --ink: #ffffff;
+  --ink-soft: rgba(255, 255, 255, 0.82);
+  --ink-faint: rgba(255, 255, 255, 0.6);
+  --hair: rgba(255, 255, 255, 0.16);
+  --rim: rgba(255, 255, 255, 0.22);
+  --rim-inner: rgba(255, 255, 255, 0.34);
+  --halo: 0 1px 3px rgba(0, 0, 0, 0.55);
+  --mode: #5ee79b;
+
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-tech: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Bright backdrop: same glass, thicker.  Still no colour, still translucent —
+   this only guarantees the white text keeps its contrast over a white window. */
+.widget[data-glass="dense"] {
+  --shade-1: rgba(10, 13, 18, 0.62);
+  --shade-2: rgba(10, 13, 18, 0.52);
+  --shade-3: rgba(10, 13, 18, 0.6);
+  --ink-soft: rgba(255, 255, 255, 0.86);
+  --ink-faint: rgba(255, 255, 255, 0.66);
+  --hair: rgba(255, 255, 255, 0.18);
+  --halo: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* Glass switched off: no native blur, and without the blur the window is opaque,
+   so the card has to be solid — otherwise white text sits on the window's own
+   light background and the whole thing looks washed out. */
+.widget[data-glass="off"] {
+  --shade-1: rgba(9, 12, 16, 0.97);
+  --shade-2: rgba(9, 12, 16, 0.94);
+  --shade-3: rgba(9, 12, 16, 0.96);
+  --rim: rgba(255, 255, 255, 0.14);
+  --rim-inner: rgba(255, 255, 255, 0.2);
+}
+
+.widget[data-glass="off"] .tint {
+  opacity: 0.35;
+}
+
+/* Wallet states. Mint (the default --mode) means the account can pay; coral means
+   it cannot; amber means the reading is stale or there is no reading at all. */
+.widget[data-mode="low"],
+.widget[data-mode="empty"] {
+  --mode: #ff9aa2;
+}
+
+.widget[data-mode="stale"],
+.widget[data-mode="offline"],
+.widget[data-mode="no_key"],
+.widget[data-mode="auth"],
+.widget[data-mode="error"] {
+  --mode: #e8be6c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  /* Opaque, not transparent: the window behind the page is the WinForms form, whose
+     colour is light grey, and a translucent page lets it show through as a milky
+     wash.  The glass now comes from a uniform window alpha instead (see app.py), and
+     the corners are cut by the window region, so nothing of this shows outside the
+     card. */
+  background: #05070a;
+}
+
+body {
+  color: var(--ink);
+  font: 400 14px/1.4 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+.widget {
+  height: 100%;
+  container-type: inline-size;
+}
+
+/* ------------------------------------------------------------------ card - */
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 13px 16px 14px;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background-image: linear-gradient(168deg, var(--shade-1), var(--shade-2) 56%, var(--shade-3));
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    inset 0 1px 0 var(--rim-inner);
+  transition: background-image 0.5s ease, box-shadow 0.5s ease;
+}
+
+/* A single highlight across the top corner — the catch that reads as glass, not
+   a whitewash.  Nothing else is painted over the blur. */
+
+.tint {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    158deg,
+    rgba(255, 255, 255, 0.11),
+    rgba(255, 255, 255, 0.02) 42%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.widget[data-glass="dense"] .tint {
+  opacity: 0.6;
+}
+
+.card-head,
+.count,
+.foot {
+  position: relative;
+  z-index: 1;
+}
+
+/* ------------------------------------------------------------------ head - */
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: 600 12px/1 var(--font-tech);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--mode);
+  text-shadow: var(--halo);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, currentColor 22%, transparent);
+  animation: pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.tools {
+  display: flex;
+  gap: 1px;
+  margin-right: -6px;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The gear is drawn on a 24px grid, so it needs a heavier stroke (24/15) to
+   end up looking the same weight as the 16px-grid icons beside it. */
+.icon-btn svg.gear {
+  stroke-width: 2.4;
+}
+
+.icon-btn:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+.icon-btn[aria-expanded="true"] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+/* ------------------------------------------------------------- countdown - */
+
+.count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: auto 0;
+  min-width: 0;
+}
+
+.digits {
+  font: 600 clamp(28px, 13.5cqw, 54px) / 0.98 var(--font-tech);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.004em;
+  color: var(--ink);
+  text-shadow: var(--halo);
+}
+
+.digits[data-long="true"] {
+  font-size: clamp(22px, 10.5cqw, 40px);
+}
+
+.suffix {
+  font: 500 13px/1 var(--font-sans);
+  color: var(--ink-soft);
+  text-shadow: var(--halo);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--hair);
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  text-shadow: var(--halo);
+}
+
+.arrow {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--mode);
+}
+
+/* The next change is one line that must never push the card around, so it
+   clips with an ellipsis instead of wrapping. */
+.foot > span:last-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.foot b {
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------- options (behind ⚙) - */
+
+.sheet {
+  position: absolute;
+  z-index: 2;
+  inset: 42px 11px 11px 11px;
+  display: flex;
+  flex-direction: column;
+  /* "safe" centring: when the content is taller than the card, alignment falls
+     back to the top instead of overflowing out of reach above the sheet */
+  justify-content: safe center;
+  gap: 9px;
+  padding: 10px 11px;
+  overflow-y: auto;
+  border: 1px solid var(--rim);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  backdrop-filter: blur(18px) saturate(1.1);
+  box-shadow: inset 0 1px 0 var(--rim-inner);
+  animation: sheet-in 0.2s ease-out;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+
+.sheet-label {
+  margin: 0;
+  font: 600 9.5px/1 var(--font-tech);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* Only shown when the sheet covers the whole card and the ⚙ is hidden. */
+.sheet-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--rim);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.sheet-close svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.sheet-close:hover {
+  color: var(--ink);
+}
+
+.chips,
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.switches {
+  padding-top: 2px;
+}
+
+.chip,
+.switch {
+  padding: 5px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink-soft);
+  font: 500 11.5px/1.15 var(--font-sans);
+  letter-spacing: 0.015em;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.chip:hover,
+.switch:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.chip[aria-pressed="true"],
+.switch[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--mode) 60%, transparent);
+  background: color-mix(in srgb, var(--mode) 22%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------- grip ----- */
+
+/* The handles are native (the host moves and resizes the window), so this only
+   has to be a target with an honest cursor. */
+.grip {
+  position: absolute;
+  z-index: 3;
+  right: 2px;
+  bottom: 2px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 7px;
+  color: var(--ink-faint);
+  cursor: nwse-resize;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.grip svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.card:hover .grip {
+  opacity: 1;
+}
+
+.grip:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+/* ------------------------------------------------------------ compact --- */
+
+/* Narrow card: the badge, countdown and next change all step down so a small
+   widget stays readable instead of overflowing. */
+@container (max-width: 268px) {
+  .card {
+    padding: 9px 11px 10px;
+  }
+
+  .card-head {
+    gap: 6px;
+  }
+
+  .badge {
+    gap: 6px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .tools {
+    margin-right: -5px;
+  }
+
+  .icon-btn {
+    width: 21px;
+    height: 21px;
+    border-radius: 7px;
+  }
+
+  .icon-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .count {
+    gap: 7px;
+  }
+
+  .suffix {
+    font-size: 11px;
+  }
+
+  .foot {
+    gap: 6px;
+    padding-top: 7px;
+    font-size: 11.5px;
+  }
+
+  .arrow {
+    font-size: 12px;
+  }
+
+  .grip {
+    width: 14px;
+    height: 14px;
+  }
+
+  .grip svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .chip,
+  .switch {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
+}
+
+/* Short card. */
+@media (max-height: 130px) {
+  .card {
+    padding: 7px 10px 8px;
+  }
+
+  .count {
+    padding-top: 0;
+  }
+
+  .foot {
+    padding-top: 6px;
+  }
+}
+
+/* 320x140 and below: the options sheet gets a tighter layout, and once the card
+   is this short it takes the whole card over and gets its own close button (the
+   ⚙ is covered). */
+@media (max-height: 185px) {
+  .sheet {
+    inset: 38px 8px 8px 8px;
+    gap: 5px;
+    padding: 7px 8px;
+  }
+
+  .sheet-label {
+    display: none;
+  }
+
+  .chip,
+  .switch {
+    padding: 3.5px 7.5px;
+    font-size: 10.5px;
+  }
+}
+
+@media (max-height: 124px) {
+  .sheet {
+    inset: 5px;
+    gap: 4px;
+    padding: 7px 8px 7px;
+    justify-content: flex-start;
+  }
+
+  .sheet-close {
+    display: grid;
+  }
+
+  .chip,
+  .switch {
+    padding: 3px 6.5px;
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot,
+  .sheet,
+  .card,
+  .tint {
+    animation: none;
+    transition: none;
+  }
+}

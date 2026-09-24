@@ -1,0 +1,7 @@
+# DeepSeek peak / off-peak Windows widget — runtime dependencies.
+# pywebview pulls in pythonnet + clr_loader on Windows (Edge WebView2 hosting),
+# and tzdata is required because Windows ships no IANA timezone database.
+pywebview==6.2.1
+pystray==0.19.5
+pillow==12.3.0
+tzdata==2026.4
