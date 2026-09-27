@@ -117,6 +117,8 @@ function render(next) {
   const scroll = list.scrollTop;
   list.replaceChildren(...(next.items || []).map(rowFor));
   list.scrollTop = scroll; // re-rendering must not jump the list under the cursor
+  // The rows changed, so the thumb's size and place did too.
+  syncScrollThumb();
 
   el('empty').hidden = total > 0;
 
@@ -175,6 +177,71 @@ function openSheet(open) {
 }
 
 /* ---------------------------------------------------------- gestures --- */
+
+/* -------------------------------------------------------------- scrollbar -- */
+
+/* The list has no system scrollbar (see styles.css), so this is what stands in for it: a
+   capsule over the list's right edge that fades in while the list is being scrolled or pointed
+   at, and fades out again when that stops.  It is drawn over the list rather than inside it, so
+   hiding it can never shift a row by a pixel. */
+const SCROLL_IDLE_MS = 900;
+let scrollIdle = 0;
+
+function syncScrollThumb() {
+  const list = el('items');
+  const thumb = el('scroll-thumb');
+  const card = el('card');
+  if (!list || !thumb || !card) return;
+
+  const track = list.clientHeight;
+  const content = list.scrollHeight;
+  if (content - track <= 2) {
+    thumb.hidden = true; // everything fits, so there is nothing to indicate
+    return;
+  }
+  thumb.hidden = false;
+
+  // Proportional, with a floor: a thumb for a very long list would otherwise be a dot.
+  const height = Math.max(22, Math.round((track * track) / content));
+  const travel = (track - height) * (list.scrollTop / (content - track));
+  const box = list.getBoundingClientRect();
+  const base = card.getBoundingClientRect();
+  thumb.style.height = `${height}px`;
+  thumb.style.top = `${Math.round(box.top - base.top + travel)}px`;
+  thumb.style.left = `${Math.round(box.right - base.left - 7)}px`;
+}
+
+function showScrollThumb() {
+  const thumb = el('scroll-thumb');
+  if (!thumb || thumb.hidden) return;
+  thumb.dataset.on = 'true';
+  clearTimeout(scrollIdle);
+  scrollIdle = setTimeout(() => {
+    thumb.dataset.on = 'false';
+  }, SCROLL_IDLE_MS);
+}
+
+function hideScrollThumb() {
+  const thumb = el('scroll-thumb');
+  if (thumb) thumb.dataset.on = 'false';
+}
+
+function bindScrollbar() {
+  const list = el('items');
+  if (!list) return;
+  list.addEventListener(
+    'scroll',
+    () => {
+      syncScrollThumb();
+      showScrollThumb();
+    },
+    { passive: true }
+  );
+  list.addEventListener('pointerenter', showScrollThumb);
+  list.addEventListener('pointerleave', hideScrollThumb);
+  window.addEventListener('resize', syncScrollThumb);
+  syncScrollThumb();
+}
 
 function bindGestures() {
   // A note has to accept typing and text selection, so the window is dragged by its
@@ -257,6 +324,7 @@ async function bootFromPreview() {
 (async function boot() {
   bindGestures();
   bindControls();
+  bindScrollbar();
   report('page ready');
 
   if (new URLSearchParams(window.location.search).has('host')) {

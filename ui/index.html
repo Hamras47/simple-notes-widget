@@ -150,6 +150,11 @@
         </header>
 
         <ul class="items" id="items"></ul>
+        <!-- The list's scrollbar, drawn by the script because the system one cannot be made to
+             look like part of this card.  It fades in while the list is scrolled or hovered and
+             is gone again a moment later.  Outside the list on purpose: hiding it can then never
+             shift a row, because it was never in the layout. -->
+        <div class="scroll-thumb" id="scroll-thumb" aria-hidden="true" hidden></div>
         <p class="empty" id="empty" hidden>Nothing on the note yet.</p>
 
         <input class="add" id="add" type="text" autocomplete="off" spellcheck="false"

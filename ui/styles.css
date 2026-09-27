@@ -36,6 +36,82 @@
   --font-tech: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 }
 
+/* --------------------------------------------------------- scrollbars ------- */
+
+/* --------------------------------------------------------- scrollbar ------- */
+
+/* The system scrollbar was the one part of this card that did not belong to it: a grey bar with
+   arrow buttons, drawn in colours the card never uses anywhere else.
+
+   So the list has no system scrollbar at all.  `scrollbar-width: none` and
+   `::-webkit-scrollbar { display: none }` remove it in either engine, and `.scroll-thumb` is
+   what takes its place: a capsule the script draws over the list, which fades in while the list
+   is scrolling or hovered and is gone again a moment later.  Because it is drawn over the list
+   rather than inside it, hiding it can never shift a row.
+
+   The settings panel keeps a real scrollbar, because a panel with more content than fits and no
+   visible bar is a trap.  That one is themed instead: invisible until the pointer is in it, then
+   the card's own rim colour.  Note that neither `scrollbar-color` nor `scrollbar-width` is used
+   for it -- setting either hands Chromium over to the *native* scrollbar, which cannot be styled
+   at all.  That is exactly where the grey arrow buttons came from. */
+.items {
+  scrollbar-width: none;
+}
+
+.items::-webkit-scrollbar {
+  display: none;
+}
+
+.scroll-thumb {
+  position: absolute;
+  width: 5px;
+  border-radius: 999px;
+  background: var(--rim);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  /* An indicator, not a control: the wheel and the keyboard do the scrolling. */
+  pointer-events: none;
+}
+
+.scroll-thumb[data-on="true"] {
+  opacity: 1;
+}
+
+.scroll-thumb[hidden] {
+  display: none;
+}
+
+.sheet::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+  background: transparent;
+}
+
+.sheet::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sheet::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.sheet:hover::-webkit-scrollbar-thumb,
+.sheet:focus-within::-webkit-scrollbar-thumb,
+.sheet::-webkit-scrollbar-thumb:hover {
+  background: var(--rim);
+  background-clip: padding-box;
+}
+
+/* The arrow buttons are the giveaway that this is a browser, and this is a card. */
+.sheet::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Bright backdrop: same glass, thicker.  Still no colour, still translucent —
    this only guarantees the white text keeps its contrast over a white window. */
 .widget[data-glass="dense"] {
