@@ -7,6 +7,16 @@ struck through.
 
 ![The settings sheet](doc/preview-note-settings.png)
 
+### No background
+
+Switch on **No background** (in the settings sheet, or the tray menu) and the card disappears:
+the widget is drawn straight onto your wallpaper, with softer text so it blends in. Right-click
+it for its menu, or choose *Show the glass card* to bring the card back.
+
+![The note with no background](doc/preview-no-background.png)
+
+Click a checkbox to tick an item off. Double-click the note to bring the card back and edit it.
+
 ## Features
 
 - **Click an item to tick it** — it strikes through and dims. Click it again to un-tick.
