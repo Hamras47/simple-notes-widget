@@ -34,6 +34,9 @@ import notes as engine
 
 import pystray
 import webview
+
+import bare
+import bare_face
 from PIL import Image, ImageDraw
 
 # --------------------------------------------------------------------------- #
@@ -657,6 +660,28 @@ def send_to_desktop_layer(handle: int) -> bool:
     return True
 
 
+GW_OWNER = 4
+GWLP_HWNDPARENT = -8
+
+
+def attach_to_desktop(handle: int) -> bool:
+    """Make the shell's desktop window (Progman) the card's owner.
+
+    An owned window always stays above its owner, so the card survives Show Desktop
+    without ever borrowing WS_EX_TOPMOST.  Guessing "is the desktop showing?" from
+    sample points misfired whenever the user's windows were not maximized, and left
+    the card topmost over their apps, covering address bars and eating clicks.
+    Returns True when the owner changed (first call, or explorer recreated Progman).
+    """
+    progman = int(_user32.FindWindowW("Progman", None) or 0)
+    if not progman:
+        return False
+    if int(_user32.GetWindow(ctypes.c_void_p(handle), GW_OWNER) or 0) == progman:
+        return False
+    _user32.SetWindowLongPtrW(ctypes.c_void_p(handle), GWLP_HWNDPARENT, ctypes.c_void_p(progman))
+    return True
+
+
 def is_app_window(handle: int) -> bool:
     """Is this one of the user's own windows?
 
@@ -679,6 +704,22 @@ def is_app_window(handle: int) -> bool:
     return bool(title.value.strip())
 
 
+WM_WINDOWPOSCHANGING = 0x0046
+HWND_BOTTOM = 1
+
+
+class _WindowPos(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("hwndInsertAfter", ctypes.c_void_p),
+        ("x", ctypes.c_int),
+        ("y", ctypes.c_int),
+        ("cx", ctypes.c_int),
+        ("cy", ctypes.c_int),
+        ("flags", ctypes.c_uint),
+    ]
+
+
 WNDPROC = ctypes.WINFUNCTYPE(
     ctypes.c_longlong,
     ctypes.c_void_p,
@@ -697,8 +738,10 @@ class MinimizeGuard:
     the watcher catch the shell paths that do not send that message.
     """
 
-    def __init__(self, handle: int) -> None:
+    def __init__(self, handle: int, pinned=lambda: False) -> None:
         self.handle = handle
+        #: True while the card belongs on the desktop layer (not "always on top").
+        self.pinned = pinned
         self.enabled = True
         self.installed = False
         self._previous = 0
@@ -729,6 +772,18 @@ class MinimizeGuard:
                 and (wparam & 0xFFF0) == SC_MINIMIZE
             ):
                 return 0
+            if (
+                self.installed
+                and message == WM_WINDOWPOSCHANGING
+                and lparam
+                and self.pinned()
+            ):
+                # Activating the desktop (Win+D, clicking the wallpaper) drags the
+                # windows it owns to the front; a desktop card never rises, so every
+                # Z-order change is turned into "bottom" (it stays above its owner).
+                position = _WindowPos.from_address(lparam)
+                if not position.flags & SWP_NOZORDER:
+                    position.hwndInsertAfter = HWND_BOTTOM
         except Exception:
             pass
         if not self.installed:
@@ -936,6 +991,8 @@ def load_config() -> dict:
         "stay_on_desktop": True,
         "draggable": True,
         "auto_density": True,
+        #: "card" (the glass card) or "none" (drawn straight onto the wallpaper, bare.py).
+        "background": "card",
         "window": dict(DEFAULT_WINDOW),
     }
     try:
@@ -1161,6 +1218,8 @@ class Widget:
         self._on_desktop_layer = False
         # The glass is re-applied once the page is alive; see boot_report.
         self._glass_ready = False
+        #: The no-background face, created the first time it is asked for.
+        self.bare: bare.BareFace | None = None
         self.glass_on = bool(self.config.get("glass", True))
         # Glass density, sampled from the desktop (see watch_glass).
         self.glass_mode = "clear"
@@ -1238,6 +1297,7 @@ class Widget:
             "glass": bool(self.config.get("glass", True)),
             "stay_on_desktop": bool(self.config.get("stay_on_desktop", True)),
             "draggable": bool(self.config.get("draggable", True)),
+            "bare": self.config.get("background") == "none",
         }
 
     def save(self) -> None:
@@ -1245,6 +1305,8 @@ class Widget:
 
     def push(self) -> None:
         """Send a fresh payload to the page (used when the price flips)."""
+        if self.bare is not None and self.bare.shown:
+            self.bare.refresh()
         if not self.window:
             return
         try:
@@ -1255,8 +1317,114 @@ class Widget:
 
     # --------------------------------------------------------------- window
 
+    # ------------------------------------------------------- no background
+
+    def render_bare(self, ink: str, scale: float) -> bare.Drawing:
+        # Same size as the card: a resized card gives a resized face.
+        zoom = self.desired_size()[0] / bare_face.WIDTH
+        return bare_face.render(self.payload(), ink, scale * zoom)
+
+    def set_background(self, none: bool) -> None:
+        """Swap the glass card for the face with no background (bare.py), or back.
+
+        The card is a WebView2 page, which always paints its own background, so "part of
+        the wallpaper" is a second, native face rather than a setting on the card.
+        """
+        self.config["background"] = "none" if none else "card"
+        self.save()
+        if not self.hwnd:
+            return
+        if none:
+            if self.bare is None:
+                self.bare = bare.BareFace(
+                    WINDOW_TITLE,
+                    self.render_bare,
+                    interval=2.0,
+                    on_click=self.bare_click,
+                    on_double=self.bare_double,
+                    menu=self.bare_menu,
+                    on_choice=self.bare_choice,
+                    on_moved=self.bare_moved,
+                    draggable=lambda: bool(self.config.get("draggable", True)),
+                    on_top=lambda: bool(self.config["on_top"]),
+                    log=log,
+                )
+                if not self.bare.start():
+                    self.bare = None
+                    self.config["background"] = "card"
+                    self.save()
+                    log("no-background face unavailable; staying on the glass card")
+                    return
+            rect = window_rect(self.hwnd)
+            set_visible(self.hwnd, False)
+            if self.visible:
+                self.bare.show(*(rect[:2] if rect else (None, None)))
+            log("background -> none (part of the wallpaper)")
+        else:
+            if self.bare is not None:
+                x, y = self.bare.position()
+                self.bare.hide()
+                _user32.SetWindowPos(
+                    self.hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                )
+            if self.visible:
+                set_visible(self.hwnd, True)
+                self.set_glass(bool(self.config.get("glass", True)), why="card back")
+                if not bool(self.config["on_top"]):
+                    send_to_desktop_layer(self.hwnd)
+            log("background -> glass card")
+        self.push()
+        self.refresh_tray()
+
+    def toggle_background(self, *_args) -> None:
+        self.set_background(self.config.get("background") != "none")
+
+    def bare_moved(self, x: int, y: int) -> None:
+        """Keep the hidden card under the face, so the position is remembered either way."""
+        if self.hwnd:
+            _user32.SetWindowPos(
+                self.hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+            )
+            self.remember_geometry()
+
+    def bare_click(self, ident: object) -> None:
+        self.note.toggle(int(ident))
+        self.push()
+
+    def bare_double(self) -> None:
+        self.set_background(False)
+
+    def bare_menu(self) -> list:
+        return [
+            (1, "Show the glass card", False),
+            None,
+            (2, "Draggable", bool(self.config.get("draggable", True))),
+            (3, "Hide to tray", False),
+            (4, "Quit", False),
+        ]
+
+    def bare_choice(self, ident: int) -> None:
+        if ident == 1:
+            self.set_background(False)
+        elif ident == 2:
+            self.toggle_draggable()
+        elif ident == 3:
+            self.set_visible(False)
+            self.refresh_tray()
+        elif ident == 4:
+            self.quit()
+        elif ident == 10:
+            self.bare_double()
+
     def set_visible(self, visible: bool) -> None:
         self.visible = visible
+        if self.config.get("background") == "none" and self.bare is not None:
+            if visible:
+                self.bare.show()
+            else:
+                self.bare.hide()
+            log("shown" if visible else "hidden to tray")
+            return
         try:
             if self.hwnd:
                 set_visible(self.hwnd, visible)
@@ -1602,6 +1770,8 @@ class Widget:
     def quit(self, *_args) -> None:
         log("quit requested")
         self.stop.set()
+        if self.bare is not None:
+            self.bare.close()
         try:
             if self.icon:
                 self.icon.stop()
@@ -1643,6 +1813,11 @@ class Widget:
         menu = pystray.Menu(
             pystray.MenuItem("New item", self.new_item_from_tray, default=True),
             pystray.MenuItem("Show / hide widget", self.toggle_visible),
+            pystray.MenuItem(
+                "No background",
+                self.toggle_background,
+                checked=lambda _item: self.config.get("background") == "none",
+            ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Always on top",
@@ -1782,8 +1957,18 @@ class Widget:
         while not self.stop.is_set():
             try:
                 if (
+                    self.config.get("background") == "none"
+                    and self.bare is not None
+                    and self.hwnd
+                    and _user32.IsWindowVisible(self.hwnd)
+                ):
+                    # pywebview shows the card again once its page has loaded; with no
+                    # background the card stays hidden behind the face.
+                    set_visible(self.hwnd, False)
+                if (
                     bool(self.config.get("stay_on_desktop", True))
                     and self.visible
+                    and self.config.get("background") != "none"
                     and self.hwnd
                 ):
                     if minimized_or_hidden(self.hwnd):
@@ -1798,6 +1983,8 @@ class Widget:
                             0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                         )
+                        if not bool(self.config["on_top"]):
+                            send_to_desktop_layer(self.hwnd)
                         self._restores += 1
                         if self._restores <= 3:
                             log(f"restored after a shell minimize (x{self._restores})")
@@ -1808,42 +1995,22 @@ class Widget:
             self.stop.wait(0.25)
 
     def stay_on_desktop(self) -> None:
-        """Keep the card visible when the shell shows the desktop.
+        """Keep the card on the desktop layer: below every app, visible through Show Desktop.
 
-        Nothing can be inserted just above the shell's desktop layer — its icon
-        host sits above the desktop window that owns it, so "above the desktop"
-        is not a place you can ask for.  Instead the card borrows WS_EX_TOPMOST
-        for exactly as long as the desktop is drawn over it, then goes back to
-        what it should be: on top when "always on top" is on, and otherwise below
-        the restored windows, which the shell arranges by itself.
-
-        This runs whatever the on-top preference says.  The shell's desktop layer
-        covers the card even when it is topmost, and skipping this whenever
-        "always on top" was set meant nothing ever brought the card back.
+        The card is owned by the desktop window, which is what keeps it visible when the
+        shell shows the desktop.  It never borrows topmost, so it can never end up
+        floating over the user's windows.
         """
-        if not self.hwnd:
+        if not self.hwnd or bool(self.config["on_top"]):
             return
-        if desktop_in_front():
-            if not self._on_desktop_layer:
-                set_topmost(self.hwnd, True)
-                self._on_desktop_layer = True
-                log("desktop shown — lifted the card back over it")
-            return
+        if attach_to_desktop(self.hwnd):
+            send_to_desktop_layer(self.hwnd)
+            log("card owned by the desktop window")
         if self._on_desktop_layer:
             self._on_desktop_layer = False
-            on_top = bool(self.config["on_top"])
-            set_topmost(self.hwnd, on_top)
-            if on_top:
-                log("desktop hidden again — card stays on top")
-            else:
-                # Clearing the topmost flag leaves the card at the front of the ordinary
-                # band, i.e. over the user's windows, so it has to be placed back.
-                placed = send_to_desktop_layer(self.hwnd)
-                log(
-                    "desktop hidden again — card placed back on the desktop"
-                    if placed
-                    else "desktop hidden again — card back below the windows"
-                )
+            set_topmost(self.hwnd, False)
+            send_to_desktop_layer(self.hwnd)
+        # While the user is using the card it may sit in front; otherwise it goes back down.
 
     # ---------------------------------------------------------------- start
 
@@ -1874,7 +2041,9 @@ class Widget:
                 self.stay_on_desktop()
                 send_to_desktop_layer(self.hwnd)
                 log("card placed on the desktop layer")
-            self.guard = MinimizeGuard(self.hwnd)
+            self.guard = MinimizeGuard(
+                self.hwnd, pinned=lambda: not bool(self.config["on_top"])
+            )
             log(
                 "minimize guard installed (the card stays on the desktop)"
                 if self.guard.install()
@@ -1883,6 +2052,8 @@ class Widget:
         else:
             log("no window handle found — native glass unavailable")
         log(f"window ready (items={len(self.note.items)}, glass={self.glass_on})")
+        if self.config.get("background") == "none":
+            self.set_background(True)
         self.start_tray()
         threading.Thread(target=self.monitor, name="monitor", daemon=True).start()
         threading.Thread(target=self.enforce_size, name="size-watch", daemon=True).start()
@@ -2178,6 +2349,8 @@ class Api:
             widget.config["notify"] = bool(value)
         elif key == "draggable":
             widget.config["draggable"] = bool(value)
+        elif key == "bare":
+            widget.set_background(bool(value))
         widget.save()
         log(f"pref {key} -> {value}")
         widget.refresh_tray()

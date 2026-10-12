@@ -25,6 +25,7 @@ const PREF_KEYS = {
   stay_on_desktop: 'sw-stay-on-desktop',
   glass: 'sw-glass',
   draggable: 'sw-draggable',
+  bare: 'sw-bare',
 };
 
 const el = (id) => document.getElementById(id);
@@ -344,3 +345,11 @@ async function bootFromPreview() {
 
 // The host pushes the note after every change, and on every preference change.
 window.__widgetPush = (payload) => render(payload);
+
+/* Right-click anywhere on the card opens the settings, like the other desktop widgets.
+   Text fields keep the normal menu (paste and so on). */
+document.addEventListener('contextmenu', (event) => {
+  if (event.target.closest('input, textarea, [contenteditable="true"]')) return;
+  event.preventDefault();
+  openSheet(true);
+});
